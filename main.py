@@ -25,9 +25,92 @@ class GameState(Enum):
     PLAYING = 2
     GAME_OVER = 3
     STATS = 4
+    SETTINGS = 5
 
 
-# Colors with gradients
+# Difficulty Settings
+class Difficulty:
+    EASY = "Easy"
+    NORMAL = "Normal"
+    HARD = "Hard"
+
+    SETTINGS = {
+        "Easy": {
+            "ball_speed": 0.10,
+            "min_speed": 3.0,
+            "min_vertical": -5,
+            "brick_damage_multiplier": 1.5,
+            "powerup_chance": 0.20,
+            "extra_balls_per_turn": 2,
+            "multiball_chance": 0.15,
+            "ball_trail_length": 25,
+            "particle_count": 12,
+            "dead_zone_offset": 50,  # More forgiving
+            "enemy_health_multiplier": 0.7
+        },
+        "Normal": {
+            "ball_speed": 0.14,
+            "min_speed": 3.5,
+            "min_vertical": -6,
+            "brick_damage_multiplier": 1.0,
+            "powerup_chance": 0.15,
+            "extra_balls_per_turn": 1,
+            "multiball_chance": 0.10,
+            "ball_trail_length": 20,
+            "particle_count": 8,
+            "dead_zone_offset": 0,
+            "enemy_health_multiplier": 1.0
+        },
+        "Hard": {
+            "ball_speed": 0.18,
+            "min_speed": 4.0,
+            "min_vertical": -7,
+            "brick_damage_multiplier": 0.7,
+            "powerup_chance": 0.10,
+            "extra_balls_per_turn": 1,
+            "multiball_chance": 0.05,
+            "ball_trail_length": 15,
+            "particle_count": 5,
+            "dead_zone_offset": -30,  # Less forgiving
+            "enemy_health_multiplier": 1.3
+        }
+    }
+
+
+# Theme Settings
+class Theme:
+    DARK = {
+        "name": "Dark",
+        "bg_top": (18, 18, 24),
+        "bg_bottom": (25, 25, 35),
+        "header_top": (22, 22, 32),
+        "header_bottom": (35, 35, 45),
+        "text": (255, 255, 255),
+        "text_secondary": (180, 180, 180),
+        "button": (50, 50, 60),
+        "button_hover": (70, 70, 80),
+        "brick_border": (0, 0, 0),
+        "dead_zone": (255, 60, 60),
+        "particle_brightness": 1.0
+    }
+
+    LIGHT = {
+        "name": "Light",
+        "bg_top": (240, 240, 250),
+        "bg_bottom": (220, 220, 240),
+        "header_top": (200, 200, 220),
+        "header_bottom": (180, 180, 200),
+        "text": (30, 30, 40),
+        "text_secondary": (80, 80, 90),
+        "button": (180, 180, 200),
+        "button_hover": (160, 160, 180),
+        "brick_border": (50, 50, 60),
+        "dead_zone": (255, 50, 50),
+        "particle_brightness": 0.8
+    }
+
+
+# Colors (will be overridden by theme)
 BLACK = (18, 18, 24)
 DARK_BG = (25, 25, 35)
 WHITE = (255, 255, 255)
@@ -45,11 +128,16 @@ PINK = (255, 100, 150)
 LIGHT_BLUE = (100, 200, 255)
 SOFT_GREEN = (100, 255, 150)
 
+# Global settings
+current_theme = Theme.DARK
+current_difficulty = Difficulty.NORMAL
+difficulty_settings = Difficulty.SETTINGS[current_difficulty]
+
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-pygame.display.set_caption("Swipe Brick Breaker")
+pygame.display.set_caption("✨ Swipe Brick Breaker - BBTAN Style ✨")
 clock = pygame.time.Clock()
 
-# Fonts with better styling
+# Fonts
 try:
     title_font = pygame.font.Font(None, 56)
     header_font = pygame.font.Font(None, 42)
@@ -75,7 +163,6 @@ BRICK_HEIGHT = 32
 # Animation variables
 screen_shake = 0
 transition_alpha = 0
-brick_move_animation = 0
 countdown_value = 3
 countdown_timer = 0
 
@@ -86,25 +173,53 @@ game_stats = {
     'accuracy': 0.0,
     'powerups_collected': 0,
     'max_combo': 0,
-    'play_time': 0
+    'play_time': 0,
+    'multiball_triggers': 0
 }
 
-# Sound effects (placeholder - will be created if files don't exist)
+# Sound effects
 try:
     shoot_sound = pygame.mixer.Sound('shoot.wav')
     break_sound = pygame.mixer.Sound('break.wav')
     powerup_sound = pygame.mixer.Sound('powerup.wav')
     game_over_sound = pygame.mixer.Sound('gameover.wav')
+    multiball_sound = pygame.mixer.Sound('multiball.wav')
 except:
-    # Create silent sounds if files don't exist
     shoot_sound = pygame.mixer.Sound(buffer=bytes(100))
     break_sound = pygame.mixer.Sound(buffer=bytes(100))
     powerup_sound = pygame.mixer.Sound(buffer=bytes(100))
     game_over_sound = pygame.mixer.Sound(buffer=bytes(100))
+    multiball_sound = pygame.mixer.Sound(buffer=bytes(100))
 
 
 # ------------------------- Save System -------------------------
 class SaveSystem:
+    @staticmethod
+    def save_settings(theme_name, difficulty_name):
+        try:
+            data = {
+                'theme': theme_name,
+                'difficulty': difficulty_name
+            }
+            if os.path.exists('settings.json'):
+                with open('settings.json', 'r') as f:
+                    existing = json.load(f)
+                    data.update(existing)
+
+            with open('settings.json', 'w') as f:
+                json.dump(data, f)
+        except:
+            pass
+
+    @staticmethod
+    def load_settings():
+        try:
+            with open('settings.json', 'r') as f:
+                data = json.load(f)
+                return data.get('theme', 'Dark'), data.get('difficulty', 'Normal')
+        except:
+            return 'Dark', 'Normal'
+
     @staticmethod
     def save_best_score(score):
         try:
@@ -131,24 +246,6 @@ class SaveSystem:
                 return data.get('best_score', 0)
         except:
             return 0
-
-    @staticmethod
-    def update_stats(games_played=0, total_bricks=0):
-        try:
-            data = {'best_score': 0, 'games_played': 0, 'total_bricks': 0}
-            if os.path.exists('save_data.json'):
-                with open('save_data.json', 'r') as f:
-                    data = json.load(f)
-
-            if games_played > 0:
-                data['games_played'] = data.get('games_played', 0) + games_played
-            if total_bricks > 0:
-                data['total_bricks'] = data.get('total_bricks', 0) + total_bricks
-
-            with open('save_data.json', 'w') as f:
-                json.dump(data, f)
-        except:
-            pass
 
 
 # ------------------------- Particle System -------------------------
@@ -178,7 +275,7 @@ class Particle:
             alpha = self.life / self.max_life
             size = int(self.size * alpha)
             if size > 0:
-                c = tuple(int(ch * alpha) for ch in self.color)
+                c = tuple(int(ch * alpha * current_theme["particle_brightness"]) for ch in self.color)
                 pygame.draw.circle(surface, c, (int(self.x), int(self.y)), size)
                 if size > 2:
                     pygame.draw.circle(surface, (255, 255, 255, int(alpha * 100)),
@@ -213,12 +310,12 @@ class FloatingText:
 
 # ------------------------- Button Class -------------------------
 class Button:
-    def __init__(self, x, y, width, height, text, color, hover_color, text_color=WHITE):
+    def __init__(self, x, y, width, height, text, color, hover_color, text_color=None):
         self.rect = pygame.Rect(x, y, width, height)
         self.text = text
         self.color = color
         self.hover_color = hover_color
-        self.text_color = text_color
+        self.text_color = text_color or current_theme["text"]
         self.current_color = color
         self.animation = 0
         self.hovered = False
@@ -246,7 +343,7 @@ class Button:
             rect.center = self.rect.center
 
         pygame.draw.rect(surface, self.current_color, rect, border_radius=10)
-        pygame.draw.rect(surface, WHITE, rect, 2, border_radius=10)
+        pygame.draw.rect(surface, current_theme["text"], rect, 2, border_radius=10)
 
         # Text
         text_surface = font.render(self.text, True, self.text_color)
@@ -255,6 +352,51 @@ class Button:
 
     def is_clicked(self, pos):
         return self.rect.collidepoint(pos)
+
+
+# ------------------------- Toggle Button -------------------------
+class ToggleButton:
+    def __init__(self, x, y, width, height, options, current_index=0):
+        self.rect = pygame.Rect(x, y, width, height)
+        self.options = options
+        self.current_index = current_index
+        self.hovered = False
+
+    def update(self, mouse_pos):
+        self.hovered = self.rect.collidepoint(mouse_pos)
+
+    def draw(self, surface):
+        color = current_theme["button_hover"] if self.hovered else current_theme["button"]
+        pygame.draw.rect(surface, color, self.rect, border_radius=10)
+        pygame.draw.rect(surface, current_theme["text"], self.rect, 2, border_radius=10)
+
+        # Current option text
+        text = font.render(self.options[self.current_index], True, current_theme["text"])
+        text_rect = text.get_rect(center=self.rect.center)
+        surface.blit(text, text_rect)
+
+        # Navigation arrows
+        if len(self.options) > 1:
+            left_arrow = "<"
+            right_arrow = ">"
+            left_text = small_font.render(left_arrow, True, current_theme["text_secondary"])
+            right_text = small_font.render(right_arrow, True, current_theme["text_secondary"])
+            surface.blit(left_text, (self.rect.left - 25, self.rect.centery - 10))
+            surface.blit(right_text, (self.rect.right + 10, self.rect.centery - 10))
+
+    def is_clicked(self, pos):
+        return self.rect.collidepoint(pos)
+
+    def next(self):
+        self.current_index = (self.current_index + 1) % len(self.options)
+        return self.options[self.current_index]
+
+    def prev(self):
+        self.current_index = (self.current_index - 1) % len(self.options)
+        return self.options[self.current_index]
+
+    def get_value(self):
+        return self.options[self.current_index]
 
 
 # ------------------------- Item Class -------------------------
@@ -276,26 +418,18 @@ class Item:
         self.symbol = self.TYPES[item_type]['symbol']
         self.float_offset = random.uniform(0, math.pi * 2)
         self.float_timer = 0
-        self.collect_animation = 0
 
     def update(self):
         self.float_timer += 0.05
         self.y += math.sin(self.float_timer + self.float_offset) * 0.5
-
-        if self.collect_animation > 0:
-            self.collect_animation -= 1
-            self.radius += 1
 
     def draw(self, surface):
         if self.active:
             pulse = 1 + math.sin(self.float_timer * 2) * 0.1
             radius = int(self.radius * pulse)
 
-            # Outer glow
             for i in range(3):
                 glow_radius = radius + i * 2
-                alpha = 100 - i * 30
-                glow_color = (*self.color, alpha)
                 pygame.draw.circle(surface, self.color, (int(self.x), int(self.y)), glow_radius, 1)
 
             pygame.draw.circle(surface, self.color, (int(self.x), int(self.y)), radius)
@@ -313,7 +447,6 @@ class Item:
         if distance < self.radius + ball.radius:
             self.active = False
             self.collected = True
-            self.collect_animation = 10
             return True
         return False
 
@@ -332,11 +465,10 @@ class Ball:
         self.fire_timer = 0
         self.pierce_mode = False
         self.pierce_count = 0
-        self.last_positions = deque(maxlen=20)
+        self.last_positions = deque(maxlen=difficulty_settings["ball_trail_length"])
         self.bricks_hit = []
         self.stopped = False
         self.landing_pos = (x, y)
-        self.trail_alpha = 1.0
         self.glow_pulse = 0
 
     def move(self):
@@ -443,11 +575,11 @@ class Ball:
 class Brick:
     def __init__(self, x, y, width, height, value):
         self.rect = pygame.Rect(x, y, width, height)
-        self.value = value
         self.initial_value = value
+        self.value = int(value * difficulty_settings["enemy_health_multiplier"])
         self.active = True
         self.hit_animation = 0
-        self.contains_item = random.random() < 0.15
+        self.contains_item = random.random() < difficulty_settings["powerup_chance"]
         self.item_type = random.choice(['extra_ball', 'fire_ball', 'pierce']) if self.contains_item else None
 
         self.update_color()
@@ -474,7 +606,7 @@ class Brick:
                 rect = self.rect
 
             pygame.draw.rect(surface, self.color, rect)
-            pygame.draw.rect(surface, BLACK, rect, 2)
+            pygame.draw.rect(surface, current_theme["brick_border"], rect, 2)
 
             highlight_rect = rect.inflate(-4, -4)
             if highlight_rect.width > 0 and highlight_rect.height > 0:
@@ -488,16 +620,23 @@ class Brick:
                 pygame.draw.circle(surface, item_color, rect.center, 7)
                 pygame.draw.circle(surface, WHITE, rect.center, 7, 1)
 
-            value_text = number_font.render(str(self.value), True, WHITE)
+            # Format value for display - show integer if whole number, 1 decimal if not
+            if abs(self.value - round(self.value)) < 0.05:
+                display_value = str(int(round(self.value)))
+            else:
+                display_value = f"{self.value:.1f}"
+
+            value_text = number_font.render(display_value, True, WHITE)
             text_rect = value_text.get_rect(center=rect.center)
 
-            shadow_text = number_font.render(str(self.value), True, BLACK)
+            shadow_text = number_font.render(display_value, True, BLACK)
             shadow_rect = shadow_text.get_rect(center=(rect.centerx + 2, rect.centery + 2))
             surface.blit(shadow_text, shadow_rect)
             surface.blit(value_text, text_rect)
 
     def hit(self, damage=1):
-        self.value -= damage
+        actual_damage = damage * difficulty_settings["brick_damage_multiplier"]
+        self.value -= actual_damage
         self.hit_animation = 10
         if self.value <= 0:
             self.active = False
@@ -511,7 +650,6 @@ class BrickGrid:
     def __init__(self):
         self.bricks = []
         self.current_level = 0
-        self.brick_values_history = []
         self.create_initial_grid()
 
     def calculate_brick_width(self):
@@ -521,8 +659,6 @@ class BrickGrid:
         self.bricks.clear()
         start_y = HEADER_HEIGHT + 20
         brick_width = self.calculate_brick_width()
-
-        self.brick_values_history.append([1])
 
         for col in range(MAX_COLS):
             if random.random() < 0.5:
@@ -534,11 +670,13 @@ class BrickGrid:
         global screen_shake
         screen_shake = 5
 
+        dead_zone = DEAD_ZONE_Y + difficulty_settings["dead_zone_offset"]
+
         for brick in self.bricks:
             brick.rect.y += BRICK_HEIGHT + MARGIN
 
         for brick in self.bricks:
-            if brick.rect.bottom >= DEAD_ZONE_Y:
+            if brick.rect.bottom >= dead_zone:
                 return False
 
         self.current_level += 1
@@ -547,8 +685,6 @@ class BrickGrid:
         start_y = HEADER_HEIGHT + 20
 
         base_value = 1 + self.current_level
-
-        row_values = []
 
         for col in range(MAX_COLS):
             chance = 0.4 + (self.current_level * 0.03)
@@ -562,10 +698,8 @@ class BrickGrid:
                 if random.random() < 0.1:
                     value += random.randint(2, 4)
 
-                row_values.append(value)
                 self.bricks.append(Brick(x, y, brick_width, BRICK_HEIGHT, value))
 
-        self.brick_values_history.append(row_values)
         return True
 
     def get_active_bricks(self):
@@ -576,47 +710,43 @@ class BrickGrid:
 def draw_gradient_background(surface):
     for i in range(HEADER_HEIGHT, SCREEN_HEIGHT):
         ratio = (i - HEADER_HEIGHT) / GAME_AREA_HEIGHT
-        r = int(18 + ratio * 10)
-        g = int(18 + ratio * 10)
-        b = int(24 + ratio * 20)
+        r = int(current_theme["bg_top"][0] + (current_theme["bg_bottom"][0] - current_theme["bg_top"][0]) * ratio)
+        g = int(current_theme["bg_top"][1] + (current_theme["bg_bottom"][1] - current_theme["bg_top"][1]) * ratio)
+        b = int(current_theme["bg_top"][2] + (current_theme["bg_bottom"][2] - current_theme["bg_top"][2]) * ratio)
         color = (r, g, b)
         pygame.draw.line(surface, color, (0, i), (SCREEN_WIDTH, i))
 
 
-def draw_dead_zone(surface, alpha=255):
+def draw_dead_zone(surface):
+    dead_zone = DEAD_ZONE_Y + difficulty_settings["dead_zone_offset"]
     pulse = math.sin(pygame.time.get_ticks() * 0.003) * 2
-    line_y = DEAD_ZONE_Y + pulse
+    line_y = dead_zone + pulse
 
     for i in range(-2, 3):
-        alpha_val = alpha - abs(i) * 50
+        alpha_val = 255 - abs(i) * 50
         if alpha_val > 0:
-            color = (255, 60, 60)
+            color = current_theme["dead_zone"]
             pygame.draw.line(surface, color, (0, line_y + i), (SCREEN_WIDTH, line_y + i), 2)
 
-    dead_text = small_font.render("DEAD ZONE", True, RED)
-    text_rect = dead_text.get_rect(center=(SCREEN_WIDTH // 2, DEAD_ZONE_Y - 15))
-
-    shadow_text = small_font.render("DEAD ZONE", True, (100, 0, 0))
-    shadow_rect = shadow_text.get_rect(center=(SCREEN_WIDTH // 2 + 1, DEAD_ZONE_Y - 14))
-    surface.blit(shadow_text, shadow_rect)
+    dead_text = small_font.render("DEAD ZONE", True, current_theme["dead_zone"])
+    text_rect = dead_text.get_rect(center=(SCREEN_WIDTH // 2, dead_zone - 15))
     surface.blit(dead_text, text_rect)
 
 
 def draw_header(surface, score, available_balls, turn, best_score, phase):
     for i in range(HEADER_HEIGHT):
         ratio = i / HEADER_HEIGHT
-        r = int(22 + ratio * 15)
-        g = int(22 + ratio * 15)
-        b = int(32 + ratio * 20)
+        r = int(current_theme["header_top"][0] + (
+                    current_theme["header_bottom"][0] - current_theme["header_top"][0]) * ratio)
+        g = int(current_theme["header_top"][1] + (
+                    current_theme["header_bottom"][1] - current_theme["header_top"][1]) * ratio)
+        b = int(current_theme["header_top"][2] + (
+                    current_theme["header_bottom"][2] - current_theme["header_top"][2]) * ratio)
         color = (r, g, b)
         pygame.draw.line(surface, color, (0, i), (SCREEN_WIDTH, i))
 
-    title_text = title_font.render("SWIPE BREAKER", True, WHITE)
+    title_text = title_font.render(" SWIPE BREAKER ", True, current_theme["text"])
     title_rect = title_text.get_rect(center=(SCREEN_WIDTH // 2, 25))
-
-    glow_text = title_font.render("SWIPE BREAKER", True, CYAN)
-    glow_rect = glow_text.get_rect(center=(SCREEN_WIDTH // 2 - 1, 24))
-    surface.blit(glow_text, glow_rect)
     surface.blit(title_text, title_rect)
 
     phase_colors = {1: CYAN, 2: GREEN}
@@ -634,89 +764,143 @@ def draw_header(surface, score, available_balls, turn, best_score, phase):
 
     for x, y, w, h, border_color, label, value, value_color in boxes:
         bg_rect = pygame.Rect(x, y, w, h)
-        pygame.draw.rect(surface, DARK_GRAY, bg_rect, border_radius=10)
+        pygame.draw.rect(surface, current_theme["button"], bg_rect, border_radius=10)
         pygame.draw.rect(surface, border_color, bg_rect, 2, border_radius=10)
 
-        label_surface = small_font.render(label, True, GRAY)
+        label_surface = small_font.render(label, True, current_theme["text_secondary"])
         surface.blit(label_surface, (x + 10, y + 5))
 
         value_surface = font.render(value, True, value_color)
         surface.blit(value_surface, (x + 10, y + 22))
 
-    pygame.draw.line(surface, DARK_GRAY, (0, HEADER_HEIGHT), (SCREEN_WIDTH, HEADER_HEIGHT), 2)
+    pygame.draw.line(surface, current_theme["text_secondary"], (0, HEADER_HEIGHT), (SCREEN_WIDTH, HEADER_HEIGHT), 2)
 
 
 def draw_menu(surface, buttons):
-    # Beautiful gradient background
     for i in range(SCREEN_HEIGHT):
         ratio = i / SCREEN_HEIGHT
-        r = int(15 + ratio * 20)
-        g = int(15 + ratio * 15)
-        b = int(25 + ratio * 30)
+        # Fix: Access tuple values correctly
+        r = int(current_theme["bg_top"][0] + ratio * 20)
+        g = int(current_theme["bg_top"][1] + ratio * 15)
+        b = int(current_theme["bg_top"][2] + ratio * 30)
+        # Ensure values are in valid range
+        r = max(0, min(255, r))
+        g = max(0, min(255, g))
+        b = max(0, min(255, b))
         color = (r, g, b)
         pygame.draw.line(surface, color, (0, i), (SCREEN_WIDTH, i))
 
-    # Animated stars
     for i in range(50):
         x = (i * 37 + pygame.time.get_ticks() * 0.01) % SCREEN_WIDTH
         y = (i * 23) % SCREEN_HEIGHT
         brightness = int(150 + 105 * math.sin(pygame.time.get_ticks() * 0.001 + i))
+        brightness = max(0, min(255, brightness))  # اطمینان از محدوده معتبر
         pygame.draw.circle(surface, (brightness, brightness, brightness), (int(x), int(y)), 1)
 
-    # Title with animation
     title_y = 150 + math.sin(pygame.time.get_ticks() * 0.002) * 10
     title_text = huge_font.render("SWIPE", True, CYAN)
     title_rect = title_text.get_rect(center=(SCREEN_WIDTH // 2, title_y))
     surface.blit(title_text, title_rect)
 
-    subtitle_text = large_font.render("BRICK BREAKER", True, WHITE)
+    subtitle_text = large_font.render("BRICK BREAKER", True, current_theme["text"])
     subtitle_rect = subtitle_text.get_rect(center=(SCREEN_WIDTH // 2, title_y + 70))
     surface.blit(subtitle_text, subtitle_rect)
 
-    # Draw buttons
+    # Difficulty indicator
+    diff_text = small_font.render(f"Difficulty: {current_difficulty}", True, ORANGE)
+    diff_rect = diff_text.get_rect(center=(SCREEN_WIDTH // 2, title_y + 110))
+    surface.blit(diff_text, diff_rect)
+
     for button in buttons:
         button.draw(surface)
 
-    # Footer
-    footer_text = small_font.render("© 2024 - Armin Naeini", True, GRAY)
+    footer_text = small_font.render("© 2026 - armin naein", True, current_theme["text_secondary"])
     footer_rect = footer_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 30))
     surface.blit(footer_text, footer_rect)
 
 
+def draw_settings(surface, back_button, theme_toggle, difficulty_toggle):
+    for i in range(SCREEN_HEIGHT):
+        ratio = i / SCREEN_HEIGHT
+        # Fix: Access tuple values correctly
+        r = int(current_theme["bg_top"][0] + ratio * 20)
+        g = int(current_theme["bg_top"][1] + ratio * 15)
+        b = int(current_theme["bg_top"][2] + ratio * 30)
+        # Ensure values are in valid range
+        r = max(0, min(255, r))
+        g = max(0, min(255, g))
+        b = max(0, min(255, b))
+        color = (r, g, b)
+        pygame.draw.line(surface, color, (0, i), (SCREEN_WIDTH, i))
+
+    title = large_font.render("SETTINGS", True, current_theme["text"])
+    title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 100))
+    surface.blit(title, title_rect)
+
+    # Theme setting
+    theme_label = font.render("Theme:", True, current_theme["text"])
+    theme_label_rect = theme_label.get_rect(center=(SCREEN_WIDTH // 2 - 80, 250))
+    surface.blit(theme_label, theme_label_rect)
+    theme_toggle.draw(surface)
+
+    # Difficulty setting
+    diff_label = font.render("Difficulty:", True, current_theme["text"])
+    diff_label_rect = diff_label.get_rect(center=(SCREEN_WIDTH // 2 - 80, 350))
+    surface.blit(diff_label, diff_label_rect)
+    difficulty_toggle.draw(surface)
+
+    # Difficulty description
+    desc_text = get_difficulty_description(current_difficulty)
+    desc_lines = desc_text.split('\n')
+    y_pos = 450
+    for line in desc_lines:
+        desc_surface = small_font.render(line, True, current_theme["text_secondary"])
+        desc_rect = desc_surface.get_rect(center=(SCREEN_WIDTH // 2, y_pos))
+        surface.blit(desc_surface, desc_rect)
+        y_pos += 25
+
+    back_button.draw(surface)
+
+
+def get_difficulty_description(difficulty):
+    descriptions = {
+        "Easy": "• Slower balls\n• More damage to bricks\n• More power-ups\n• Extra balls per turn",
+        "Normal": "• Balanced gameplay\n• Standard difficulty\n• Classic BBTAN experience",
+        "Hard": "• Faster balls\n• Less damage to bricks\n• Fewer power-ups\n• Tough challenge"
+    }
+    return descriptions.get(difficulty, "")
+
+
 def draw_stats_screen(surface, stats, back_button):
-    # Dark overlay
     overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
     overlay.fill((0, 0, 0, 200))
     surface.blit(overlay, (0, 0))
 
-    # Stats panel
     panel_rect = pygame.Rect(50, 100, SCREEN_WIDTH - 100, SCREEN_HEIGHT - 200)
-    pygame.draw.rect(surface, DARK_GRAY, panel_rect, border_radius=20)
+    pygame.draw.rect(surface, current_theme["button"], panel_rect, border_radius=20)
     pygame.draw.rect(surface, CYAN, panel_rect, 3, border_radius=20)
 
-    # Title
-    title = large_font.render("STATISTICS", True, CYAN)
+    title = large_font.render("📊 STATISTICS 📊", True, CYAN)
     title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 140))
     surface.blit(title, title_rect)
 
-    # Stats
     stats_list = [
         f"Bricks Broken: {stats['bricks_broken']}",
         f"Total Shots: {stats['total_shots']}",
         f"Accuracy: {stats['accuracy']:.1f}%",
         f"Power-ups Collected: {stats['powerups_collected']}",
+        f"Multiball Triggers: {stats['multiball_triggers']}",
         f"Max Combo: {stats['max_combo']}x",
         f"Play Time: {stats['play_time']}s"
     ]
 
     y_pos = 250
     for stat in stats_list:
-        text = font.render(stat, True, WHITE)
+        text = font.render(stat, True, current_theme["text"])
         rect = text.get_rect(center=(SCREEN_WIDTH // 2, y_pos))
         surface.blit(text, rect)
-        y_pos += 50
+        y_pos += 45
 
-    # Back button
     back_button.draw(surface)
 
 
@@ -729,7 +913,6 @@ def draw_countdown(surface, countdown_value):
         countdown_text = huge_font.render(str(countdown_value), True, CYAN)
         text_rect = countdown_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
 
-        # Pulsing effect
         scale = 1 + math.sin(pygame.time.get_ticks() * 0.005) * 0.1
         scaled_text = pygame.transform.scale(countdown_text,
                                              (int(text_rect.width * scale),
@@ -750,9 +933,6 @@ def draw_aim_line(surface, start_pos, end_pos):
         length = math.sqrt(dx ** 2 + dy ** 2)
 
         if length > 10:
-            vx = dx * 0.14
-            vy = dy * 0.14
-
             steps = int(length // 10)
             for i in range(steps):
                 t = i / steps
@@ -768,6 +948,13 @@ def draw_aim_line(surface, start_pos, end_pos):
 # ------------------------- Main Game -------------------------
 def main():
     global screen_shake, countdown_value, countdown_timer, game_stats
+    global current_theme, current_difficulty, difficulty_settings
+
+    # Load saved settings
+    saved_theme, saved_difficulty = SaveSystem.load_settings()
+    current_theme = Theme.DARK if saved_theme == 'Dark' else Theme.LIGHT
+    current_difficulty = saved_difficulty
+    difficulty_settings = Difficulty.SETTINGS[current_difficulty]
 
     # Game state
     game_state = GameState.MENU
@@ -776,10 +963,20 @@ def main():
     # Menu buttons
     menu_buttons = [
         Button(SCREEN_WIDTH // 2 - 100, 400, 200, 50, "START GAME", GREEN, SOFT_GREEN),
-        Button(SCREEN_WIDTH // 2 - 100, 470, 200, 50, "QUIT", RED, (255, 100, 100))
+        Button(SCREEN_WIDTH // 2 - 100, 470, 200, 50, "SETTINGS", BLUE, LIGHT_BLUE),
+        Button(SCREEN_WIDTH // 2 - 100, 540, 200, 50, "QUIT", RED, (255, 100, 100))
     ]
 
     back_button = Button(SCREEN_WIDTH // 2 - 100, SCREEN_HEIGHT - 120, 200, 50, "BACK", BLUE, LIGHT_BLUE)
+
+    # Settings toggles
+    theme_options = ["Dark", "Light"]
+    theme_index = 0 if current_theme == Theme.DARK else 1
+    theme_toggle = ToggleButton(SCREEN_WIDTH // 2 + 20, 235, 150, 40, theme_options, theme_index)
+
+    difficulty_options = ["Easy", "Normal", "Hard"]
+    difficulty_index = difficulty_options.index(current_difficulty)
+    difficulty_toggle = ToggleButton(SCREEN_WIDTH // 2 + 20, 335, 150, 40, difficulty_options, difficulty_index)
 
     # Game variables
     grid = None
@@ -806,7 +1003,8 @@ def main():
     game_start_time = 0
 
     # UI
-    reset_button = Button(SCREEN_WIDTH - 120, HEADER_HEIGHT + 10, 100, 35, "MENU", DARK_GRAY, GRAY)
+    menu_button = Button(SCREEN_WIDTH - 120, HEADER_HEIGHT + 10, 100, 35, "MENU", current_theme["button"],
+                         current_theme["button_hover"])
 
     # Background stars
     stars = [(random.randint(0, SCREEN_WIDTH), random.randint(HEADER_HEIGHT, SCREEN_HEIGHT),
@@ -867,7 +1065,8 @@ def main():
                             'accuracy': 0.0,
                             'powerups_collected': 0,
                             'max_combo': 0,
-                            'play_time': 0
+                            'play_time': 0,
+                            'multiball_triggers': 0
                         }
 
                         # Start countdown
@@ -876,21 +1075,53 @@ def main():
                         game_start_time = pygame.time.get_ticks()
 
                     elif menu_buttons[1].is_clicked(mouse_pos):
+                        game_state = GameState.SETTINGS
+
+                    elif menu_buttons[2].is_clicked(mouse_pos):
                         running = False
                         pygame.quit()
                         sys.exit()
+
+            elif game_state == GameState.SETTINGS:
+                theme_toggle.update(mouse_pos)
+                difficulty_toggle.update(mouse_pos)
+                back_button.update(mouse_pos)
+
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if back_button.is_clicked(mouse_pos):
+                        game_state = GameState.MENU
+                    elif theme_toggle.is_clicked(mouse_pos):
+                        if event.button == 1:  # Left click
+                            new_theme = theme_toggle.next()
+                            current_theme = Theme.DARK if new_theme == "Dark" else Theme.LIGHT
+                            SaveSystem.save_settings(new_theme, current_difficulty)
+                        elif event.button == 3:  # Right click
+                            new_theme = theme_toggle.prev()
+                            current_theme = Theme.DARK if new_theme == "Dark" else Theme.LIGHT
+                            SaveSystem.save_settings(new_theme, current_difficulty)
+                    elif difficulty_toggle.is_clicked(mouse_pos):
+                        if event.button == 1:  # Left click
+                            new_difficulty = difficulty_toggle.next()
+                        elif event.button == 3:  # Right click
+                            new_difficulty = difficulty_toggle.prev()
+                        else:
+                            new_difficulty = current_difficulty
+
+                        current_difficulty = new_difficulty
+                        difficulty_settings = Difficulty.SETTINGS[current_difficulty]
+                        SaveSystem.save_settings(current_theme["name"], current_difficulty)
 
             elif game_state == GameState.PLAYING:
                 if countdown_value > 0:
                     continue
 
+                menu_button.update(mouse_pos)
+
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     mx, my = pygame.mouse.get_pos()
 
-                    if reset_button.is_clicked(mouse_pos):
+                    if menu_button.is_clicked(mouse_pos):
                         game_state = GameState.MENU
-                        if not game_over:
-                            SaveSystem.update_stats(games_played=1)
                         continue
 
                     if can_shoot and not game_over and available_balls > 0:
@@ -908,12 +1139,12 @@ def main():
                         dx = swipe_end[0] - swipe_start[0]
                         dy = swipe_end[1] - swipe_start[1]
 
-                        vx = dx * 0.14
-                        vy = dy * 0.14
+                        vx = dx * difficulty_settings["ball_speed"]
+                        vy = dy * difficulty_settings["ball_speed"]
 
-                        if math.sqrt(vx ** 2 + vy ** 2) < 3.5:
-                            vx = random.uniform(-0.8, 0.8)
-                            vy = -6
+                        if math.sqrt(vx ** 2 + vy ** 2) < difficulty_settings["min_speed"]:
+                            vx = random.uniform(-1, 1)
+                            vy = difficulty_settings["min_vertical"]
 
                         shoot_x, shoot_y = last_landing_pos
                         new_ball = Ball(shoot_x, shoot_y - 10, vx, vy)
@@ -953,9 +1184,6 @@ def main():
                 if text.life <= 0:
                     floating_texts.remove(text)
 
-            # Update reset button
-            reset_button.update(mouse_pos)
-
             # Update balls
             for ball in balls[:]:
                 if ball.active and not ball.stopped:
@@ -976,22 +1204,22 @@ def main():
                                             ball.pierce_mode = False
                                     continue
 
-                                for _ in range(8):
+                                for _ in range(difficulty_settings["particle_count"]):
                                     particles.append(Particle(brick.rect.centerx, brick.rect.centery, brick.color))
 
                                 if destroyed:
-                                    score += brick.initial_value * 10
+                                    score += int(brick.initial_value * 10)
                                     game_stats['bricks_broken'] += 1
 
                                     floating_texts.append(FloatingText(
                                         brick.rect.centerx, brick.rect.centery - 20,
-                                        f"+{brick.initial_value * 10}", GOLD, 28
+                                        f"+{int(brick.initial_value * 10)}", GOLD, 28
                                     ))
 
                                     if brick.contains_item and brick.item_type:
                                         items.append(Item(brick.rect.centerx, brick.rect.centery, brick.item_type))
 
-                                    for _ in range(15):
+                                    for _ in range(difficulty_settings["particle_count"] + 5):
                                         particles.append(Particle(brick.rect.centerx, brick.rect.centery, GOLD, 1.5))
 
                                     screen_shake = 3
@@ -1035,6 +1263,18 @@ def main():
                     last_landing_pos = ball.landing_pos
                     waiting_for_return = False
 
+                    # Multiball chance!
+                    if random.random() < difficulty_settings["multiball_chance"] and first_throw_done:
+                        extra_balls = random.randint(1, 2)
+                        for _ in range(extra_balls):
+                            available_balls += 1
+                        game_stats['multiball_triggers'] += 1
+                        floating_texts.append(FloatingText(
+                            SCREEN_WIDTH // 2, HEADER_HEIGHT + 200,
+                            f"MULTIBALL! +{extra_balls} BALLS!", ORANGE, 36
+                        ))
+                        multiball_sound.play()
+
                     if not first_throw_done:
                         first_throw_done = True
                         phase = 2
@@ -1049,21 +1289,18 @@ def main():
                             game_state = GameState.STATS
                             game_over_sound.play()
 
-                            # Calculate accuracy
                             if game_stats['total_shots'] > 0:
                                 game_stats['accuracy'] = (game_stats['bricks_broken'] / game_stats['total_shots']) * 100
 
-                            # Save best score
                             best_score = SaveSystem.save_best_score(score)
-                            SaveSystem.update_stats(games_played=1, total_bricks=game_stats['bricks_broken'])
 
                             screen_shake = 10
                         else:
                             turn_count += 1
-                            available_balls += 1
+                            available_balls += difficulty_settings["extra_balls_per_turn"]
                             floating_texts.append(FloatingText(
                                 SCREEN_WIDTH // 2, HEADER_HEIGHT + 150,
-                                f"Turn {turn_count} - +1 Ball!", CYAN, 28
+                                f"Turn {turn_count} - +{difficulty_settings['extra_balls_per_turn']} Ball!", CYAN, 28
                             ))
 
                     can_shoot = True
@@ -1082,8 +1319,11 @@ def main():
         if game_state == GameState.MENU:
             draw_menu(screen, menu_buttons)
 
+        elif game_state == GameState.SETTINGS:
+            draw_settings(screen, back_button, theme_toggle, difficulty_toggle)
+
         elif game_state == GameState.PLAYING:
-            screen.fill(DARK_BG)
+            screen.fill(current_theme["bg_top"])
             draw_gradient_background(screen)
 
             # Draw stars
@@ -1132,19 +1372,19 @@ def main():
 
             draw_header(screen, score, available_balls, turn_count, best_score, phase)
 
-            reset_button.draw(screen)
+            menu_button.draw(screen)
 
             if waiting_for_return and countdown_value == 0:
                 status_text = font.render("Ball in play...", True, YELLOW)
                 status_rect = status_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 80))
                 pulse = abs(math.sin(pygame.time.get_ticks() * 0.003)) * 50 + 200
-                status_text_pulse = font.render("⚽ Ball in play... ⚽", True, (255, int(pulse), 0))
+                status_text_pulse = font.render("Ball in play...", True, (255, int(pulse), 0))
                 screen.blit(status_text_pulse, status_rect)
             elif can_shoot and available_balls > 0 and not game_over and countdown_value == 0:
                 if not first_throw_done:
                     status_text = font.render("First throw - Swipe up!", True, CYAN)
                 else:
-                    status_text = font.render(f" Turn {turn_count + 1} - Swipe up!", True, GREEN)
+                    status_text = font.render(f"Turn {turn_count + 1} - Swipe up!", True, GREEN)
                 status_rect = status_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 80))
                 screen.blit(status_text, status_rect)
 
@@ -1152,11 +1392,9 @@ def main():
                 draw_countdown(screen, countdown_value)
 
         elif game_state == GameState.STATS:
-            # Show game over screen with stats
-            screen.fill(DARK_BG)
+            screen.fill(current_theme["bg_top"])
             draw_gradient_background(screen)
 
-            # Draw game elements in background (dimmed)
             if grid:
                 for brick in grid.bricks:
                     brick.draw(screen)
